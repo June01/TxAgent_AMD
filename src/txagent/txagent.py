@@ -535,6 +535,7 @@ class TxAgent:
                     )
 
                     if special_tool_call == "Finish":
+                        # import pdb; pdb.set_trace()
                         next_round = False
                         conversation.extend(function_call_messages)
                         if isinstance(
@@ -543,9 +544,12 @@ class TxAgent:
                             function_call_messages[0]["content"] = next(
                                 function_call_messages[0]["content"]
                             )
-                        return function_call_messages[0]["content"].split(
+                        final_answer = function_call_messages[0]["content"].split(
                             "[FinalAnswer]"
                         )[-1]
+                        conversation.append({"role": "assistant", "content": final_answer})
+                        # import pdb; pdb.set_trace()
+                        return final_answer,conversation
 
                     if (self.enable_summary or token_overflow) and not call_agent:
                         if token_overflow:
@@ -563,7 +567,7 @@ class TxAgent:
                         conversation.extend(
                             [{"role": "assistant", "content": "".join(last_outputs)}]
                         )
-                        return "".join(last_outputs).replace("</s>", "")
+                        return "".join(last_outputs).replace("</s>", ""), conversation
                 if self.enable_checker:
                     good_status, wrong_info = checker.check_conversation()
                     if not good_status:
@@ -591,18 +595,18 @@ class TxAgent:
             if self.force_finish:
                 return self.get_answer_based_on_unfinished_reasoning(
                     conversation, temperature, max_new_tokens, max_token
-                )
+                ), conversation
             else:
-                return None
+                return None, conversation
 
         except Exception as e:
             print(f"Error: {e}")
             if self.force_finish:
                 return self.get_answer_based_on_unfinished_reasoning(
                     conversation, temperature, max_new_tokens, max_token
-                )
+                ), conversation
             else:
-                return None
+                return None, conversation
 
     def build_logits_processor(self, messages, llm):
         # Use the tokenizer from the LLM instance.
