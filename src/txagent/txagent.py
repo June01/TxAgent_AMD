@@ -228,62 +228,61 @@ class TxAgent:
         call_agent_level=None,
         temperature=None,
     ):
+        import pdb; pdb.set_trace()
         function_call_json, message = self.tooluniverse.extract_function_call_json_from_qwen(fcall_str, return_message=return_message, verbose=False)
         call_results = []
         special_tool_call = ""
         # import pdb; pdb.set_trace()
         if function_call_json is not None:
-            if isinstance(function_call_json, list):
-                for i in range(len(function_call_json)):
-                    print("\033[94mTool Call:\033[0m", function_call_json[i])
-                    if function_call_json[i]["name"] == "Finish":
-                        special_tool_call = "Finish"
-                        break
-                    elif function_call_json[i]["name"] == "Tool_RAG":
-                        new_tools_prompt, call_result = self.tool_RAG(
-                            message=message,
-                            existing_tools_prompt=existing_tools_prompt,
-                            rag_num=self.step_rag_num,
-                            return_call_result=True,
-                        )
-                        existing_tools_prompt += new_tools_prompt
-                    elif function_call_json[i]["name"] == "CallAgent":
-                        if call_agent_level < 2 and call_agent:
-                            solution_plan = function_call_json[i]["arguments"][
-                                "solution"
-                            ]
-                            full_message = (
-                                message_for_call_agent
-                                + "\nYou must follow the following plan to answer the question: "
-                                + str(solution_plan)
-                            )
-                            call_result = self.run_multistep_agent(
-                                full_message,
-                                temperature=temperature,
-                                max_new_tokens=1024,
-                                max_token=99999,
-                                call_agent=False,
-                                call_agent_level=call_agent_level,
-                            )
-                            call_result = call_result.split("[FinalAnswer]")[-1].strip()
-                        else:
-                            call_result = "Error: The CallAgent has been disabled. Please proceed with your reasoning process to solve this question."
-                    else:
-                        call_result = self.tooluniverse.run_one_function(
-                            function_call_json[i]
-                        )
+            if not isinstance(function_call_json, list):
+                function_call_json = [function_call_json]
 
-                    call_id = self.tooluniverse.call_id_gen()
-                    function_call_json[i]["call_id"] = call_id
-                    print("\033[94mTool Call Result:\033[0m", call_result)
-                    call_results.append(
-                        {
-                            "role": "tool",
-                            "content": json.dumps(
-                                {"content": call_result, "call_id": call_id}
-                            ),
-                        }
+            for i in range(len(function_call_json)):
+                print("\033[94mTool Call:\033[0m", function_call_json[i])
+                if function_call_json[i]["name"] == "Finish":
+                    special_tool_call = "Finish"
+                    break
+                elif function_call_json[i]["name"] == "Tool_RAG":
+                    import pdb; pdb.set_trace()
+                    new_tools_prompt, call_result = self.tool_RAG(message=message,existing_tools_prompt=existing_tools_prompt,rag_num=self.step_rag_num,return_call_result=True,)
+                    existing_tools_prompt += new_tools_prompt
+                elif function_call_json[i]["name"] == "CallAgent":
+                    if call_agent_level < 2 and call_agent:
+                        solution_plan = function_call_json[i]["arguments"][
+                            "solution"
+                        ]
+                        full_message = (
+                            message_for_call_agent
+                            + "\nYou must follow the following plan to answer the question: "
+                            + str(solution_plan)
+                        )
+                        call_result = self.run_multistep_agent(
+                            full_message,
+                            temperature=temperature,
+                            max_new_tokens=1024,
+                            max_token=99999,
+                            call_agent=False,
+                            call_agent_level=call_agent_level,
+                        )
+                        call_result = call_result.split("[FinalAnswer]")[-1].strip()
+                    else:
+                        call_result = "Error: The CallAgent has been disabled. Please proceed with your reasoning process to solve this question."
+                else:
+                    call_result = self.tooluniverse.run_one_function(
+                        function_call_json[i]
                     )
+
+                call_id = self.tooluniverse.call_id_gen()
+                function_call_json[i]["call_id"] = call_id
+                print("\033[94mTool Call Result:\033[0m", call_result)
+                call_results.append(
+                    {
+                        "role": "tool",
+                        "content": json.dumps(
+                            {"content": call_result, "call_id": call_id}
+                        ),
+                    }
+                )
         else:
             return None, existing_tools_prompt, special_tool_call
 
@@ -370,6 +369,7 @@ class TxAgent:
             while next_round and current_round < max_round:
                 current_round += 1
                 if len(outputs) > 0:
+                    # import pdb; pdb.set_trace()
                     function_call_messages, picked_tools_prompt, special_tool_call = (
                         self.run_function_call(
                             last_outputs,
@@ -405,7 +405,7 @@ class TxAgent:
                     last_status = self.function_result_summary(
                         conversation, status=last_status, enable_summary=enable_summary
                     )
-                    import pdb; pdb.set_trace()
+                    
                     if function_call_messages is not None:
                         conversation.extend(function_call_messages)
                         outputs.append(tool_result_format(function_call_messages))
@@ -423,6 +423,8 @@ class TxAgent:
                         break
                 last_outputs = []
                 outputs.append("### TxAgent:\n")
+                import pdb; pdb.set_trace()
+                # last_outputs_str, token_overflow = self.llm_infer(messages=conversation,temperature=temperature,tools=picked_tools_prompt, skip_special_tokens=False, max_new_tokens=max_new_tokens,max_token=max_token,check_token_status=True,)
                 last_outputs_str, token_overflow = self.llm_infer(
                     messages=conversation,
                     temperature=temperature,
@@ -473,6 +475,20 @@ class TxAgent:
         else:
             return None
 
+    def clean_tools(self, tools):
+        """清理工具对象，确保所有字段都是可序列化的"""
+        cleaned_tools = []
+        for tool in tools:
+            cleaned_tool = tool.copy()
+            if 'parameter' in cleaned_tool:
+                if cleaned_tool['parameter'] is None:
+                    cleaned_tool['parameter'] = {}
+                elif isinstance(cleaned_tool['parameter'], dict):
+                    if 'properties' in cleaned_tool['parameter'] and cleaned_tool['parameter']['properties'] is None:
+                        cleaned_tool['parameter']['properties'] = {}
+            cleaned_tools.append(cleaned_tool)
+        return cleaned_tools
+    
     def llm_infer(
         self,
         messages,
@@ -499,9 +515,8 @@ class TxAgent:
             logits_processors=logits_processor,
             seed=seed if seed is not None else self.seed,
         )
-        prompt = self.chat_template.render(
-            messages=messages, tools=tools, add_generation_prompt=True
-        )
+        import pdb; pdb.set_trace()
+        prompt = self.chat_template.render(messages=messages, tools=self.clean_tools(tools), add_generation_prompt=True)
         if output_begin_string is not None:
             prompt += output_begin_string
 
