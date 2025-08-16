@@ -46,7 +46,51 @@ class TxAgent:
         self.rag_model = ToolRAGModel(rag_model_name)
         self.tooluniverse = None
         # self.tool_desc = None
-        self.prompt_multi_step = "You are a helpful assistant that will solve problems through detailed, step-by-step reasoning and actions based on your reasoning. Typically, your actions will use the provided functions. You have access to the following functions."
+        # self.prompt_multi_step = 'You are a helpful assistant that will solve problems through detailed, step-by-step reasoning and actions based on your reasoning. Typically, your actions will use the provided functions. You have access to the following functions.Given the following functions, please respond with a JSON for a list of function calls with its proper arguments that best answers the given prompt.\n\nRespond in the format: Current thought[{"name": function name, "parameters": dictionary of argument name and its value}].Do not use variables.\n\n'
+        self.prompt_multi_step = """You are a helpful assistant that solves problems through detailed, step-by-step reasoning and actions. 
+Your reasoning should always appear explicitly as `Thought`. 
+When you decide to act, output an `Action` JSON object. 
+After an Action, wait for the `Observation` before continuing. 
+Repeat the Thought → Action → Observation cycle as needed. 
+
+When you are confident of the answer, output:  
+FinalAnswer: <the correct option letter>  
+Action: {"name": "Finish", "parameters": {}}  
+
+Do not invent tools. Do not use variables.  
+Always strictly follow the Thought/Action/Observation format.
+
+---
+
+Few-shot Example:
+
+Question: Which drug brand name is associated with the treatment of acne?  
+A: Salicylic Acid  
+B: Minoxidil  
+C: Ketoconazole  
+D: Fluocinonide  
+
+Thought: I need to check which of these drugs is used to treat acne.  
+Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Salicylic Acid", "limit": 5}}  
+Observation: Returned information shows Salicylic Acid has indications including "treatment of acne".  
+
+Thought: I should confirm other options to rule them out.  
+Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Minoxidil", "limit": 5}}  
+Observation: Minoxidil is indicated for hair regrowth and hypertension, not acne.  
+
+Thought: Next, check Ketoconazole.  
+Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Ketoconazole", "limit": 5}}  
+Observation: Ketoconazole is indicated for fungal infections, not acne.  
+
+Thought: Finally, check Fluocinonide.  
+Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Fluocinonide", "limit": 5}}  
+Observation: Fluocinonide is indicated for inflammatory dermatoses, not acne.  
+
+Thought: Only Salicylic Acid is associated with acne treatment.  
+FinalAnswer: A  
+Action: {"name": "Finish", "parameters": {}}  
+"""
+
         self.self_prompt = "Strictly follow the instruction."
         self.chat_prompt = "You are helpful assistant to chat with the user."
         self.enable_finish = enable_finish
@@ -228,11 +272,10 @@ class TxAgent:
         call_agent_level=None,
         temperature=None,
     ):
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         function_call_json, message = self.tooluniverse.extract_function_call_json_from_qwen(fcall_str, return_message=return_message, verbose=False)
         call_results = []
         special_tool_call = ""
-        # import pdb; pdb.set_trace()
         if function_call_json is not None:
             if not isinstance(function_call_json, list):
                 function_call_json = [function_call_json]
@@ -243,7 +286,6 @@ class TxAgent:
                     special_tool_call = "Finish"
                     break
                 elif function_call_json[i]["name"] == "Tool_RAG":
-                    import pdb; pdb.set_trace()
                     new_tools_prompt, call_result = self.tool_RAG(message=message,existing_tools_prompt=existing_tools_prompt,rag_num=self.step_rag_num,return_call_result=True,)
                     existing_tools_prompt += new_tools_prompt
                 elif function_call_json[i]["name"] == "CallAgent":
@@ -423,7 +465,7 @@ class TxAgent:
                         break
                 last_outputs = []
                 outputs.append("### TxAgent:\n")
-                import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
                 # last_outputs_str, token_overflow = self.llm_infer(messages=conversation,temperature=temperature,tools=picked_tools_prompt, skip_special_tokens=False, max_new_tokens=max_new_tokens,max_token=max_token,check_token_status=True,)
                 last_outputs_str, token_overflow = self.llm_infer(
                     messages=conversation,
@@ -477,9 +519,26 @@ class TxAgent:
 
     def clean_tools(self, tools):
         """清理工具对象，确保所有字段都是可序列化的"""
+        if tools is None:
+            return []
+        
         cleaned_tools = []
         for tool in tools:
             cleaned_tool = tool.copy()
+            
+            # 处理所有可能的 Undefined 值
+            def clean_undefined(obj):
+                if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Undefined':
+                    return None
+                elif isinstance(obj, dict):
+                    return {k: clean_undefined(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_undefined(item) for item in obj]
+                else:
+                    return obj
+            
+            cleaned_tool = clean_undefined(cleaned_tool)
+            
             if 'parameter' in cleaned_tool:
                 if cleaned_tool['parameter'] is None:
                     cleaned_tool['parameter'] = {}
