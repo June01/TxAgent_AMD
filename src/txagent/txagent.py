@@ -46,50 +46,7 @@ class TxAgent:
         self.rag_model = ToolRAGModel(rag_model_name)
         self.tooluniverse = None
         # self.tool_desc = None
-        # self.prompt_multi_step = 'You are a helpful assistant that will solve problems through detailed, step-by-step reasoning and actions based on your reasoning. Typically, your actions will use the provided functions. You have access to the following functions.Given the following functions, please respond with a JSON for a list of function calls with its proper arguments that best answers the given prompt.\n\nRespond in the format: Current thought[{"name": function name, "parameters": dictionary of argument name and its value}].Do not use variables.\n\n'
-        self.prompt_multi_step = """You are a helpful assistant that solves problems through detailed, step-by-step reasoning and actions. 
-Your reasoning should always appear explicitly as `Thought`. 
-When you decide to act, output an `Action` JSON object. 
-After an Action, wait for the `Observation` before continuing. 
-Repeat the Thought → Action → Observation cycle as needed. 
-
-When you are confident of the answer, output:  
-FinalAnswer: <the correct option letter>  
-Action: {"name": "Finish", "parameters": {}}  
-
-Do not invent tools. Do not use variables.  
-Always strictly follow the Thought/Action/Observation format.
-
----
-
-Few-shot Example:
-
-Question: Which drug brand name is associated with the treatment of acne?  
-A: Salicylic Acid  
-B: Minoxidil  
-C: Ketoconazole  
-D: Fluocinonide  
-
-Thought: I need to check which of these drugs is used to treat acne.  
-Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Salicylic Acid", "limit": 5}}  
-Observation: Returned information shows Salicylic Acid has indications including "treatment of acne".  
-
-Thought: I should confirm other options to rule them out.  
-Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Minoxidil", "limit": 5}}  
-Observation: Minoxidil is indicated for hair regrowth and hypertension, not acne.  
-
-Thought: Next, check Ketoconazole.  
-Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Ketoconazole", "limit": 5}}  
-Observation: Ketoconazole is indicated for fungal infections, not acne.  
-
-Thought: Finally, check Fluocinonide.  
-Action: {"name": "ToolRAG", "parameters": {"description": "Check FDA indications for Fluocinonide", "limit": 5}}  
-Observation: Fluocinonide is indicated for inflammatory dermatoses, not acne.  
-
-Thought: Only Salicylic Acid is associated with acne treatment.  
-FinalAnswer: A  
-Action: {"name": "Finish", "parameters": {}}  
-"""
+        self.prompt_multi_step = 'You are a helpful assistant that will solve problems through detailed, step-by-step reasoning and actions based on your reasoning. Typically, your actions will use the provided functions. You have access to the following functions.Given the following functions, please respond with a JSON for a list of function calls with its proper arguments that best answers the given prompt.\n\nRespond in the format:[{"name": function name, "parameters": dictionary of argument name and its value}].Do not use variables.\n\n'
 
         self.self_prompt = "Strictly follow the instruction."
         self.chat_prompt = "You are helpful assistant to chat with the user."
@@ -116,6 +73,59 @@ Action: {"name": "Finish", "parameters": {}}
     def print_self_values(self):
         for attr, value in self.__dict__.items():
             print(f"{attr}: {value}")
+
+    def normalize_for_qwen(self, messages, tools):
+        norm_msgs = []
+        for m in messages:
+            m = dict(m)
+
+            # 1) content 必须是字符串
+            if not isinstance(m.get("content"), str):
+                m["content"] = json.dumps(m["content"], ensure_ascii=False)
+
+            # 2) tool_calls: 字符串 -> list[dict{name, arguments}]
+            tc = m.get("tool_calls")
+            if isinstance(tc, str):
+                try:
+                    tc = json.loads(tc)
+                except Exception:
+                    tc = []
+            if isinstance(tc, list):
+                fixed = []
+                for item in tc:
+                    if not isinstance(item, dict):
+                        continue
+                    # 兼容 {"function": {"name":..., "arguments":...}}
+                    if "function" in item and isinstance(item["function"], dict):
+                        name = item["function"].get("name")
+                        args = item["function"].get("arguments") or item["function"].get("parameters") or {}
+                    else:
+                        name = item.get("name")
+                        args = item.get("arguments") or item.get("parameters") or {}
+                    if not name:
+                        continue
+                    # arguments 需可 JSON 序列化
+                    if not isinstance(args, (dict, str)):
+                        try:
+                            args = dict(args)
+                        except Exception:
+                            args = {}
+                    fixed.append({"name": name, "arguments": args})
+                m["tool_calls"] = fixed
+            else:
+                m["tool_calls"] = []
+            norm_msgs.append(m)
+
+        # 3) tools: 纯 JSON & properties 兜底
+        norm_tools = []
+        for t in tools or []:
+            t = dict(t)
+            if "parameter" in t and isinstance(t["parameter"], dict):
+                param = t["parameter"]
+                if param.get("properties") is None:
+                    param["properties"] = {}
+            norm_tools.append(t)
+        return norm_msgs, norm_tools
 
     def load_models(self, model_name=None):
         if model_name is not None:
@@ -517,37 +527,6 @@ Action: {"name": "Finish", "parameters": {}}
         else:
             return None
 
-    def clean_tools(self, tools):
-        """清理工具对象，确保所有字段都是可序列化的"""
-        if tools is None:
-            return []
-        
-        cleaned_tools = []
-        for tool in tools:
-            cleaned_tool = tool.copy()
-            
-            # 处理所有可能的 Undefined 值
-            def clean_undefined(obj):
-                if hasattr(obj, '__class__') and obj.__class__.__name__ == 'Undefined':
-                    return None
-                elif isinstance(obj, dict):
-                    return {k: clean_undefined(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [clean_undefined(item) for item in obj]
-                else:
-                    return obj
-            
-            cleaned_tool = clean_undefined(cleaned_tool)
-            
-            if 'parameter' in cleaned_tool:
-                if cleaned_tool['parameter'] is None:
-                    cleaned_tool['parameter'] = {}
-                elif isinstance(cleaned_tool['parameter'], dict):
-                    if 'properties' in cleaned_tool['parameter'] and cleaned_tool['parameter']['properties'] is None:
-                        cleaned_tool['parameter']['properties'] = {}
-            cleaned_tools.append(cleaned_tool)
-        return cleaned_tools
-    
     def llm_infer(
         self,
         messages,
@@ -574,8 +553,11 @@ Action: {"name": "Finish", "parameters": {}}
             logits_processors=logits_processor,
             seed=seed if seed is not None else self.seed,
         )
-        import pdb; pdb.set_trace()
-        prompt = self.chat_template.render(messages=messages, tools=self.clean_tools(tools), add_generation_prompt=True)
+        # import pdb; pdb.set_trace()
+        # 只有当模型类型是qwen时才调用normalize_for_qwen
+        if self.model_name and "qwen" in self.model_name.lower():
+            messages, tools = self.normalize_for_qwen(messages, tools)
+        prompt = self.chat_template.render(messages=messages, tools=tools, add_generation_prompt=True)
         if output_begin_string is not None:
             prompt += output_begin_string
 
