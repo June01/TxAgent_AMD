@@ -46,7 +46,7 @@ class TxAgent:
         self.rag_model = ToolRAGModel(rag_model_name)
         self.tooluniverse = None
         # self.tool_desc = None
-        self.prompt_multi_step = 'You are a helpful assistant that will solve problems through detailed, step-by-step reasoning and actions based on your reasoning. Typically, your actions will use the provided functions. You have access to the following functions.Given the following functions, please respond with a JSON for a list of function calls with its proper arguments that best answers the given prompt.\n\nRespond in the format:[{"name": function name, "parameters": dictionary of argument name and its value}].Do not use variables.\n\n'
+        self.prompt_multi_step = 'You are a helpful assistant that will solve problems through detailed, step-by-step reasoning and actions based on your reasoning. Typically, your actions will use the provided functions. You have access to the following functions.Given the following functions, please respond with a JSON for a list of function calls with its proper arguments that best answers the given prompt.\n\nRespond in the format:[{"name": function name, "parameters": dictionary of argument name and its value}]. Do not use variables.\n\n'
 
         self.self_prompt = "Strictly follow the instruction."
         self.chat_prompt = "You are helpful assistant to chat with the user."
@@ -283,7 +283,8 @@ class TxAgent:
         temperature=None,
     ):
         # import pdb; pdb.set_trace()
-        function_call_json, message = self.tooluniverse.extract_function_call_json_from_qwen(fcall_str, return_message=return_message, verbose=False)
+        # function_call_json, message = self.tooluniverse.extract_function_call_json_from_qwen(fcall_str, return_message=return_message, verbose=False)
+        function_call_json, message = self.tooluniverse.extract_function_call_json(fcall_str, return_message=return_message, verbose=False)
         call_results = []
         special_tool_call = ""
         if function_call_json is not None:
