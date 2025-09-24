@@ -30,6 +30,8 @@ class TxAgent:
         summary_mode="step",
         summary_skip_last_k=0,
         summary_context_length=None,
+        tool_content_summary_threshold=1000,
+        summary_temperature=0.1,
         force_finish=True,
         avoid_repeat=True,
         seed=None,
@@ -58,6 +60,11 @@ class TxAgent:
         self.summary_context_length = summary_context_length
         self.init_rag_num = init_rag_num
         self.step_rag_num = step_rag_num
+        # ==================== NEW PARAMETER START ====================
+        self.tool_content_summary_threshold = tool_content_summary_threshold # Threshold to trigger summarization for long tool outputs
+        self.summary_temperature = summary_temperature # Temperature for summary agent
+        print(f"\033[31mSummary temperature: {self.summary_temperature}\033[0m")
+        # ==================== NEW PARAMETER END ======================
         self.force_finish = force_finish
         self.avoid_repeat = avoid_repeat
         self.seed = seed
@@ -324,7 +331,36 @@ class TxAgent:
                     call_result = self.tooluniverse.run_one_function(
                         function_call_json[i]
                     )
-
+                    # 
+                    token_count = len(self.tokenizer.encode(str(call_result), return_tensors="pt")[0])
+                    # ==================== MODIFICATION START ====================
+                    # Check if the tool result is a long string and needs summarization.
+                    if token_count > self.tool_content_summary_threshold:
+                        
+                        print(f"\033[91mTool content is long ({token_count} tokens), which exceeds the threshold of {self.tool_content_summary_threshold}. Summarizing...\033[0m")
+                        
+                        # The 'message' variable holds the thought process (Chain-of-Thought) that led to this tool call.
+                        # We use it as the context for a relevant summary.
+                        thought_context = "Query: \n" + message_for_call_agent + "\n\nThought: \n" + message + "\n\nFunction Call:\n" + json.dumps(function_call_json[i])
+                        
+                        summarized_result = self.run_summary_agent(
+                            thought_calls=thought_context,
+                            function_response=call_result,
+                            temperature=self.summary_temperature,  # Use instance summary temperature
+                            max_new_tokens=512, # A reasonable length for a summary
+                            max_token=4096      # Max token for the summarizer model itself
+                        )
+                        # print(thought_context)
+                        # print('*'*100)
+                        # print(summarized_result)
+                        # import pdb; pdb.set_trace()
+                        # Calculate token counts for both original and summarized results
+                        summarized_token_count = len(self.tokenizer.encode(summarized_result, return_tensors="pt")[0])
+                        print(f"\033[91mOriginal Tokens: {token_count}, Summarized Tokens: {summarized_token_count}\033[0m")
+                        # Replace the long result with its summary.
+                        call_result = summarized_result
+                    # ==================== MODIFICATION END ======================
+                
                 call_id = self.tooluniverse.call_id_gen()
                 function_call_json[i]["call_id"] = call_id
                 print("\033[94mTool Call Result:\033[0m", call_result)
@@ -590,12 +626,12 @@ class TxAgent:
         self,
         thought_calls: str,
         function_response: str,
-        temperature: float,
-        max_new_tokens: int,
-        max_token: int,
+        temperature: float = None,
+        max_new_tokens: int = 1024,
+        max_token: int = 99999,
     ) -> str:
         print("\033[1;32;40mSummarized Tool Result:\033[0m")
-        generate_tool_result_summary_training_prompt = """Thought and function calls: 
+        generate_tool_result_summary_training_prompt = """Query, thought and function calls: 
 {thought_calls}
 
 Function calls' responses:
@@ -603,11 +639,11 @@ Function calls' responses:
 {function_response}
 \"\"\"
 
-Based on the Thought and function calls, and the function calls' responses, you need to generate a summary of the function calls' responses that fulfills the requirements of the thought. The summary MUST BE ONE sentence and include all necessary information.
+Based on the Query, thought and function calls, and the function calls' responses, you need to generate a summary of the function calls' responses that is most relevant to the query and fulfills the requirements of thought. The summary MUST BE no more than three sentences and include all necessary information.
 
 Directly respond with the summarized sentence of the function calls' responses only. 
 
-Generate **one summarized sentence** about "function calls' responses" with necessary information, and respond with a string:
+Generate **no more than three summarized sentences** about "function calls' responses" with necessary information, and respond with a string:
             """.format(
             thought_calls=thought_calls, function_response=function_response
         )
@@ -615,6 +651,10 @@ Generate **one summarized sentence** about "function calls' responses" with nece
         conversation.append(
             {"role": "user", "content": generate_tool_result_summary_training_prompt}
         )
+        # Use instance summary_temperature if temperature is not provided
+        if temperature is None:
+            temperature = self.summary_temperature
+            
         output = self.llm_infer(
             messages=conversation,
             temperature=temperature,
@@ -703,7 +743,7 @@ Generate **one summarized sentence** about "function calls' responses" with nece
                             result_summary = self.run_summary_agent(
                                 thought_calls=this_thought_calls,
                                 function_response=function_response,
-                                temperature=0.1,
+                                temperature=self.summary_temperature,
                                 max_new_tokens=1024,
                                 max_token=99999,
                             )
@@ -737,7 +777,7 @@ Generate **one summarized sentence** about "function calls' responses" with nece
             result_summary = self.run_summary_agent(
                 thought_calls=this_thought_calls,
                 function_response=function_response,
-                temperature=0.1,
+                temperature=self.summary_temperature,
                 max_new_tokens=1024,
                 max_token=99999,
             )
