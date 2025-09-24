@@ -30,7 +30,7 @@ class TxAgent:
         summary_mode="step",
         summary_skip_last_k=0,
         summary_context_length=None,
-        tool_content_summary_threshold=1000,
+        tool_content_summary_threshold=0,
         summary_temperature=0.1,
         force_finish=True,
         avoid_repeat=True,
