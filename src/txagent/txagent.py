@@ -30,7 +30,8 @@ class TxAgent:
         summary_mode="step",
         summary_skip_last_k=0,
         summary_context_length=None,
-        tool_content_summary_threshold=0,
+        tool_content_summary_threshold=20000,
+        summary_model_name="gemini-2.5-pro",
         summary_temperature=0.1,
         force_finish=True,
         avoid_repeat=True,
@@ -64,6 +65,7 @@ class TxAgent:
         self.tool_content_summary_threshold = tool_content_summary_threshold # Threshold to trigger summarization for long tool outputs
         self.summary_temperature = summary_temperature # Temperature for summary agent
         print(f"\033[31mSummary temperature: {self.summary_temperature}\033[0m")
+        self.summary_model_name = summary_model_name
         # ==================== NEW PARAMETER END ======================
         self.force_finish = force_finish
         self.avoid_repeat = avoid_repeat
@@ -71,11 +73,35 @@ class TxAgent:
         self.enable_checker = enable_checker
         self.additional_default_tools = additional_default_tools
         self.print_self_values()
+        self.init_summary_model()
+
+    # 初始化最终用于summary的模型
+    def init_summary_model(self):
+        """
+        初始化用于最终summary的模型。
+        可以在__init__中通过self.summary_model_name等参数进行配置。
+        """
+        try:
+            from .eval_framework import GeminiModel
+            # 这里假设self.summary_model_name
+            # import pdb; pdb.set_trace()
+            self.summary_model = GeminiModel(
+                model_name=getattr(self, "summary_model_name", "gemini-2.5-pro"),
+                api_key=os.getenv("GEMINI_API_KEY"),
+                google_search_enabled=True,
+            )
+            # self.summary_model = GeminiModel(model_name=getattr(self, "summary_model_name", "gemini-2.5-pro"),api_key=os.getenv("GEMINI_API_KEY"),google_search_enabled=True,)
+            self.summary_model.load()
+            print(f"\033[31mSummary模型：{self.summary_model_name}初始化成功\033[0m")
+        except Exception as e:
+            print(f"Summary模型初始化失败: {e}")
+            self.summary_model = None
 
     def init_model(self):
         self.load_models()
         self.load_tooluniverse()
         self.load_tool_desc_embedding()
+        
 
     def print_self_values(self):
         for attr, value in self.__dict__.items():
@@ -473,19 +499,34 @@ class TxAgent:
 
                     if special_tool_call == "Finish":
                         next_round = False
-                        conversation.extend(function_call_messages)
-                        if isinstance(
-                            function_call_messages[0]["content"], types.GeneratorType
-                        ):
-                            function_call_messages[0]["content"] = next(
-                                function_call_messages[0]["content"]
-                            )
-                        final_answer = function_call_messages[0]["content"].split(
-                            "[FinalAnswer]"
-                        )[-1]
-                        conversation.append({"role": "assistant", "content": final_answer})
-                        
-                        return final_answer,conversation
+                        # import pdb; pdb.set_trace()
+                        if self.summary_model:
+                            # import pdb; pdb.set_trace()
+                            response_result = self.summary_model.inference(conversation)
+                            if isinstance(response_result, tuple):
+                                response = response_result[0]  # 取第一个元素作为响应文本
+                            else:
+                                response = response_result
+                            final_answer = response.split("[FinalAnswer]")[-1].strip()
+                            # import pdb; pdb.set_trace()
+                            conversation.extend(function_call_messages)
+                            conversation.append({"role": "assistant", "content": response})
+                            return final_answer, conversation
+                            
+                        else:
+                            conversation.extend(function_call_messages)
+                            if isinstance(
+                                function_call_messages[0]["content"], types.GeneratorType
+                            ):
+                                function_call_messages[0]["content"] = next(
+                                    function_call_messages[0]["content"]
+                                )
+                            final_answer = function_call_messages[0]["content"].split(
+                                "[FinalAnswer]"
+                            )[-1]
+                            conversation.append({"role": "assistant", "content": final_answer})
+                            
+                            return final_answer,conversation
 
                     if (self.enable_summary or token_overflow) and not call_agent:
                         if token_overflow:
