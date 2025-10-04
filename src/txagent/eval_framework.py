@@ -184,7 +184,7 @@ class GeminiModel(BaseModel):
         self, model_name: str, api_key: str = None, google_search_enabled: bool = True
     ):
         super().__init__(model_name)
-        self.api_key = api_key or "AIzaSyDAwHySDiJ7qOOEG0x6M3r6jgIfilAbkwc"
+        self.api_key = api_key
         self.google_search_enabled = google_search_enabled
         self.client = None
 
