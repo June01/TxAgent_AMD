@@ -31,7 +31,8 @@ class TxAgent:
         summary_skip_last_k=0,
         summary_context_length=None,
         tool_content_summary_threshold=20000,
-        summary_model_name="gemini-2.5-pro",
+        summary_model_name=None,
+        # summary_model_name="gemini-2.5-pro",
         summary_temperature=0.1,
         force_finish=True,
         avoid_repeat=True,
@@ -94,7 +95,7 @@ class TxAgent:
             self.summary_model.load()
             print(f"\033[31mSummary模型：{self.summary_model_name}初始化成功\033[0m")
         except Exception as e:
-            print(f"Summary模型初始化失败: {e}")
+            print(f"\033[31mSummary模型初始化失败: {e}\033[0m")
             self.summary_model = None
 
     def init_model(self):
@@ -625,12 +626,28 @@ class TxAgent:
             model = self.model
 
         logits_processor = self.build_logits_processor(messages, model)
+        # sampling_params = SamplingParams(
+        #     temperature=temperature,
+        #     max_tokens=max_new_tokens,
+        #     logits_processors=logits_processor,
+        #     seed=seed if seed is not None else self.seed,
+        # )
         sampling_params = SamplingParams(
             temperature=temperature,
             max_tokens=max_new_tokens,
             logits_processors=logits_processor,
+            top_p=0.95,
+            logprobs=True,
+            top_logprobs=10,
+            n=3,
+            extra_body={"top_k": 0,
+            "vllm_xargs": {
+                'enable_conf': True,
+                'window_size': 2048}
+            },
             seed=seed if seed is not None else self.seed,
         )
+
         # import pdb; pdb.set_trace()
         # 只有当模型类型是qwen时才调用normalize_for_qwen
         if self.model_name and "qwen" in self.model_name.lower():
