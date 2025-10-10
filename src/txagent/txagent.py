@@ -84,16 +84,18 @@ class TxAgent:
         """
         try:
             from .eval_framework import GeminiModel
-            # 这里假设self.summary_model_name
-            # import pdb; pdb.set_trace()
-            self.summary_model = GeminiModel(
-                model_name=getattr(self, "summary_model_name", "gemini-2.5-pro"),
-                api_key=os.getenv("GEMINI_API_KEY"),
-                google_search_enabled=True,
-            )
-            # self.summary_model = GeminiModel(model_name=getattr(self, "summary_model_name", "gemini-2.5-pro"),api_key=os.getenv("GEMINI_API_KEY"),google_search_enabled=True,)
-            self.summary_model.load()
-            print(f"\033[31mSummary模型：{self.summary_model_name}初始化成功\033[0m")
+            # 如果 summary_model_name 为 None，则不初始化 summary_model
+            if getattr(self, "summary_model_name", None) is None:
+                self.summary_model = None
+                print(f"\033[31mSummary模型未初始化，因为 summary_model_name=None\033[0m")
+            else:
+                self.summary_model = GeminiModel(
+                    model_name=getattr(self, "summary_model_name", "gemini-2.5-pro"),
+                    api_key=os.getenv("GEMINI_API_KEY"),
+                    google_search_enabled=True,
+                )
+                self.summary_model.load()
+                print(f"\033[31mSummary模型：{self.summary_model_name}初始化成功\033[0m")
         except Exception as e:
             print(f"\033[31mSummary模型初始化失败: {e}\033[0m")
             self.summary_model = None
@@ -626,27 +628,27 @@ class TxAgent:
             model = self.model
 
         logits_processor = self.build_logits_processor(messages, model)
-        # sampling_params = SamplingParams(
-        #     temperature=temperature,
-        #     max_tokens=max_new_tokens,
-        #     logits_processors=logits_processor,
-        #     seed=seed if seed is not None else self.seed,
-        # )
         sampling_params = SamplingParams(
             temperature=temperature,
             max_tokens=max_new_tokens,
             logits_processors=logits_processor,
-            top_p=0.95,
-            logprobs=True,
-            top_logprobs=10,
-            n=3,
-            extra_body={"top_k": 0,
-            "vllm_xargs": {
-                'enable_conf': True,
-                'window_size': 2048}
-            },
             seed=seed if seed is not None else self.seed,
         )
+        # sampling_params = SamplingParams(
+        #     temperature=temperature,
+        #     max_tokens=max_new_tokens,
+        #     logits_processors=logits_processor,
+        #     top_p=0.95,
+        #     logprobs=True,
+        #     top_logprobs=10,
+        #     n=3,
+        #     extra_body={"top_k": 0,
+        #     "vllm_xargs": {
+        #         'enable_conf': True,
+        #         'window_size': 2048}
+        #     },
+        #     seed=seed if seed is not None else self.seed,
+        # )
 
         # import pdb; pdb.set_trace()
         # 只有当模型类型是qwen时才调用normalize_for_qwen
