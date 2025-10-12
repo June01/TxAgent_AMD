@@ -104,7 +104,6 @@ class TxAgent:
         self.load_models()
         self.load_tooluniverse()
         self.load_tool_desc_embedding()
-        
 
     def print_self_values(self):
         for attr, value in self.__dict__.items():
@@ -360,36 +359,7 @@ class TxAgent:
                     call_result = self.tooluniverse.run_one_function(
                         function_call_json[i]
                     )
-                    # 
-                    token_count = len(self.tokenizer.encode(str(call_result), return_tensors="pt")[0])
-                    # ==================== MODIFICATION START ====================
-                    # Check if the tool result is a long string and needs summarization.
-                    if token_count > self.tool_content_summary_threshold:
-                        
-                        print(f"\033[91mTool content is long ({token_count} tokens), which exceeds the threshold of {self.tool_content_summary_threshold}. Summarizing...\033[0m")
-                        
-                        # The 'message' variable holds the thought process (Chain-of-Thought) that led to this tool call.
-                        # We use it as the context for a relevant summary.
-                        thought_context = "Query: \n" + message_for_call_agent + "\n\nThought: \n" + message + "\n\nFunction Call:\n" + json.dumps(function_call_json[i])
-                        
-                        summarized_result = self.run_summary_agent(
-                            thought_calls=thought_context,
-                            function_response=call_result,
-                            temperature=self.summary_temperature,  # Use instance summary temperature
-                            max_new_tokens=512, # A reasonable length for a summary
-                            max_token=4096      # Max token for the summarizer model itself
-                        )
-                        # print(thought_context)
-                        # print('*'*100)
-                        # print(summarized_result)
-                        # import pdb; pdb.set_trace()
-                        # Calculate token counts for both original and summarized results
-                        summarized_token_count = len(self.tokenizer.encode(summarized_result, return_tensors="pt")[0])
-                        print(f"\033[91mOriginal Tokens: {token_count}, Summarized Tokens: {summarized_token_count}\033[0m")
-                        # Replace the long result with its summary.
-                        call_result = summarized_result
-                    # ==================== MODIFICATION END ======================
-                
+
                 call_id = self.tooluniverse.call_id_gen()
                 function_call_json[i]["call_id"] = call_id
                 print("\033[94mTool Call Result:\033[0m", call_result)
@@ -502,34 +472,19 @@ class TxAgent:
 
                     if special_tool_call == "Finish":
                         next_round = False
-                        # import pdb; pdb.set_trace()
-                        if self.summary_model:
-                            # import pdb; pdb.set_trace()
-                            response_result = self.summary_model.inference(conversation)
-                            if isinstance(response_result, tuple):
-                                response = response_result[0]  # 取第一个元素作为响应文本
-                            else:
-                                response = response_result
-                            final_answer = response.split("[FinalAnswer]")[-1].strip()
-                            # import pdb; pdb.set_trace()
-                            conversation.extend(function_call_messages)
-                            conversation.append({"role": "assistant", "content": response})
-                            return final_answer, conversation
-                            
-                        else:
-                            conversation.extend(function_call_messages)
-                            if isinstance(
-                                function_call_messages[0]["content"], types.GeneratorType
-                            ):
-                                function_call_messages[0]["content"] = next(
-                                    function_call_messages[0]["content"]
-                                )
-                            final_answer = function_call_messages[0]["content"].split(
-                                "[FinalAnswer]"
-                            )[-1]
-                            conversation.append({"role": "assistant", "content": final_answer})
-                            
-                            return final_answer,conversation
+                        conversation.extend(function_call_messages)
+                        if isinstance(
+                            function_call_messages[0]["content"], types.GeneratorType
+                        ):
+                            function_call_messages[0]["content"] = next(
+                                function_call_messages[0]["content"]
+                            )
+                        final_answer = function_call_messages[0]["content"].split(
+                            "[FinalAnswer]"
+                        )[-1]
+                        conversation.append({"role": "assistant", "content": final_answer})
+                        
+                        return final_answer,conversation
 
                     if (self.enable_summary or token_overflow) and not call_agent:
                         if token_overflow:
@@ -634,22 +589,6 @@ class TxAgent:
             logits_processors=logits_processor,
             seed=seed if seed is not None else self.seed,
         )
-        # sampling_params = SamplingParams(
-        #     temperature=temperature,
-        #     max_tokens=max_new_tokens,
-        #     logits_processors=logits_processor,
-        #     top_p=0.95,
-        #     logprobs=True,
-        #     top_logprobs=10,
-        #     n=3,
-        #     extra_body={"top_k": 0,
-        #     "vllm_xargs": {
-        #         'enable_conf': True,
-        #         'window_size': 2048}
-        #     },
-        #     seed=seed if seed is not None else self.seed,
-        # )
-
         # import pdb; pdb.set_trace()
         # 只有当模型类型是qwen时才调用normalize_for_qwen
         if self.model_name and "qwen" in self.model_name.lower():
@@ -686,12 +625,12 @@ class TxAgent:
         self,
         thought_calls: str,
         function_response: str,
-        temperature: float = None,
-        max_new_tokens: int = 1024,
-        max_token: int = 99999,
+        temperature: float,
+        max_new_tokens: int,
+        max_token: int,
     ) -> str:
         print("\033[1;32;40mSummarized Tool Result:\033[0m")
-        generate_tool_result_summary_training_prompt = """Query, thought and function calls: 
+        generate_tool_result_summary_training_prompt = """Thought and function calls: 
 {thought_calls}
 
 Function calls' responses:
@@ -699,11 +638,11 @@ Function calls' responses:
 {function_response}
 \"\"\"
 
-Based on the Query, thought and function calls, and the function calls' responses, you need to generate a summary of the function calls' responses that is most relevant to the query and fulfills the requirements of thought. The summary MUST BE no more than three sentences and include all necessary information.
+Based on the Thought and function calls, and the function calls' responses, you need to generate a summary of the function calls' responses that fulfills the requirements of the thought. The summary MUST BE ONE sentence and include all necessary information.
 
 Directly respond with the summarized sentence of the function calls' responses only. 
 
-Generate **no more than three summarized sentences** about "function calls' responses" with necessary information, and respond with a string:
+Generate **one summarized sentence** about "function calls' responses" with necessary information, and respond with a string:
             """.format(
             thought_calls=thought_calls, function_response=function_response
         )
@@ -711,10 +650,6 @@ Generate **no more than three summarized sentences** about "function calls' resp
         conversation.append(
             {"role": "user", "content": generate_tool_result_summary_training_prompt}
         )
-        # Use instance summary_temperature if temperature is not provided
-        if temperature is None:
-            temperature = self.summary_temperature
-            
         output = self.llm_infer(
             messages=conversation,
             temperature=temperature,
@@ -803,7 +738,7 @@ Generate **no more than three summarized sentences** about "function calls' resp
                             result_summary = self.run_summary_agent(
                                 thought_calls=this_thought_calls,
                                 function_response=function_response,
-                                temperature=self.summary_temperature,
+                                temperature=0.1,
                                 max_new_tokens=1024,
                                 max_token=99999,
                             )
@@ -837,7 +772,7 @@ Generate **no more than three summarized sentences** about "function calls' resp
             result_summary = self.run_summary_agent(
                 thought_calls=this_thought_calls,
                 function_response=function_response,
-                temperature=self.summary_temperature,
+                temperature=0.1,
                 max_new_tokens=1024,
                 max_token=99999,
             )
