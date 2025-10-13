@@ -363,6 +363,8 @@ class TxAgent:
                 call_id = self.tooluniverse.call_id_gen()
                 function_call_json[i]["call_id"] = call_id
                 print("\033[94mTool Call Result:\033[0m", call_result)
+                if call_result is None:
+                    continue
                 call_results.append(
                     {
                         "role": "tool",
